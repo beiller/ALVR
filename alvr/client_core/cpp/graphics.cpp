@@ -191,9 +191,22 @@ in lowp vec2 uv;
 in lowp vec4 fragmentColor;
 out lowp vec4 outColor;
 uniform sampler2D Texture0;
-void main()
-{
+
+vec2 RGBToCC(vec4 rgba) {
+    float Y = 0.299 * rgba.r + 0.587 * rgba.g + 0.114 * rgba.b;
+    return vec2((rgba.b - Y) * 0.565, (rgba.r - Y) * 0.713);
+}      
+
+void main() {
+    vec4 keyRGBA = vec4(0.0, 1.0, 0.0, 1.0);    // key color as rgba
+    vec2 keyCC = RGBToCC(keyRGBA);  // the CC part of YCC color model of key color 
+    vec2 range = vec2(0.3, 0.4);     // the smoothstep range
+
     outColor = texture(Texture0, uv);
+    vec2 CC = RGBToCC(outColor);
+
+    float mask = sqrt(pow(keyCC.x - CC.x, 2.0) + pow(keyCC.y - CC.y, 2.0));
+    outColor.a = smoothstep(range.x, range.y, mask);
 }
 )glsl";
 
@@ -252,29 +265,54 @@ uniform lowp int Mode;
 void main()
 {
     if(Mode == 0){                                      // ground
-        lowp vec3 groundCenter = vec3(1.0, 1.0, 1.0);
-        lowp vec3 groundHorizon = vec3(1.0, 1.0, 1.0);
+        lowp vec3 groundCenter = vec3(0.0, 0.0, 0.00);
+        lowp vec3 groundHorizon = vec3(0.00, 0.00, 0.015);
+
+        lowp vec3 gridClose = vec3(0.114, 0.545, 0.804);
+        lowp vec3 gridFar = vec3(0.259, 0.863, 0.886);
+
+        lowp float lineFadeStart = 10.0;
+        lowp float lineFadeEnd = 50.0;
+        lowp float lineFadeDist = lineFadeEnd - lineFadeStart;
+
+        lowp float lineBloom = 10.0;
 
         lowp float distance = length(position.xz);
+
         // Pick a coordinate to visualize in a grid
         lowp vec2 coord = position.xz / 2.0;
+
         // Compute anti-aliased world-space grid lines
         lowp vec2 grid = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
-        lowp float line = min(grid.x, grid.y);
-        outColor.rgb = vec3(min(line, 1.0) * (1.0 - exp(-distance / 5.0 - 0.01) / 4.0)) * groundCenter;
-        if(distance > 3.0){
-            lowp float coef = 1.0 - 3.0 / distance;
+
+        // Create mask for grid lines and fade over distance
+        lowp float line = clamp(1.0 - min(grid.x, grid.y), 0.0, 1.0);
+        line *= clamp((lineFadeStart - distance) / lineFadeDist, 0.0, 1.0);
+
+        // Fill in normal ground colour
+        outColor.rgb = groundCenter * (1.0 - line);
+
+        // Add cheap and simple "bloom" to the grid lines
+        line *= 1.0 + lineBloom;
+
+        // Fill in grid line colour
+        outColor.rgb += line * mix(gridFar, gridClose, clamp((lineFadeEnd - distance) / lineFadeEnd, 0.0, 1.0));
+
+        // Fade to the horizon colour over distance
+        if(distance > 10.0){
+            lowp float coef = 1.0 - 10.0 / distance;
             outColor.rgb = (1.0 - coef) * outColor.rgb + coef * groundHorizon;
         }
+
         outColor.a = 1.0;
     } else if(Mode == 1) {                             // text
-        lowp vec3 textColor = vec3(0.0, 0.0, 0.0);
+        lowp vec3 textColor = vec3(1.0, 1.0, 1.0);
 
         outColor.rgb = textColor;
         outColor.a = texture(sTexture, uv).a;
     } else {                                           // sky
-        lowp vec3 skyCenter = vec3(0.95, 0.95, 0.95);
-        lowp vec3 skyHorizon = vec3(1.0, 1.0, 1.0);
+        lowp vec3 skyCenter = vec3(0.0, 0.0, 0.0);
+        lowp vec3 skyHorizon = vec3(0.0, 0.0, 0.02);
 
         lowp float coef = 1.0;
         if(position.y < 50.0){
@@ -287,9 +325,6 @@ void main()
         outColor.a = 1.0;
         outColor.rgb = skyCenter * coef + skyHorizon * (1.0 - coef);
     }
-
-    // invert. looks good only for black and white
-    outColor.rgb = 1.0 - outColor.rgb;
 }
 )glsl";
 
@@ -300,7 +335,7 @@ void ovrFramebuffer_Create(ovrFramebuffer *frameBuffer,
     for (int i = 0; i < textures.size(); i++) {
         auto glRenderTarget = textures[i];
         frameBuffer->renderTargets.push_back(std::make_unique<gl_render_utils::Texture>(
-            true, glRenderTarget, false, width, height, GL_SRGB8_ALPHA8, GL_RGBA));
+            true, glRenderTarget, false, width, height, GL_RGBA16F, GL_RGBA));
         frameBuffer->renderStates.push_back(
             std::make_unique<gl_render_utils::RenderState>(frameBuffer->renderTargets[i].get()));
     }
@@ -558,19 +593,21 @@ void ovrRenderer_Create(ovrRenderer *renderer,
                         std::vector<GLuint> textures[2],
                         FFRData ffrData,
                         bool isLobby,
-                        bool enableSrgbCorrection) {
+                        bool enableSrgbCorrection,
+                        bool fixLimitedRange,
+                        float encodingGamma) {
     if (!isLobby) {
         renderer->srgbCorrectionPass = std::make_unique<SrgbCorrectionPass>(streamTexture);
         renderer->enableFFE = ffrData.enabled;
         if (renderer->enableFFE) {
             FoveationVars fv = CalculateFoveationVars(ffrData);
             renderer->srgbCorrectionPass->Initialize(
-                fv.optimizedEyeWidth, fv.optimizedEyeHeight, !enableSrgbCorrection);
+                fv.optimizedEyeWidth, fv.optimizedEyeHeight, !enableSrgbCorrection, fixLimitedRange, encodingGamma);
             renderer->ffr = std::make_unique<FFR>(renderer->srgbCorrectionPass->GetOutputTexture());
             renderer->ffr->Initialize(fv);
             renderer->streamRenderTexture = renderer->ffr->GetOutputTexture()->GetGLTexture();
         } else {
-            renderer->srgbCorrectionPass->Initialize(width, height, !enableSrgbCorrection);
+            renderer->srgbCorrectionPass->Initialize(width, height, !enableSrgbCorrection, fixLimitedRange, encodingGamma);
             renderer->streamRenderTexture =
                 renderer->srgbCorrectionPass->GetOutputTexture()->GetGLTexture();
         }
@@ -659,7 +696,11 @@ void renderEye(
         GL(glBindVertexArray(0));
         GL(glBindTexture(GL_TEXTURE_2D, 0));
     } else {
-        GL(glClear(GL_DEPTH_BUFFER_BIT));
+        GL(glClearColor(0.0f, 0.0f, 0.0f, 0.0f));
+        GL(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
+
+        GL(glEnable(GL_BLEND));
+        GL(glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA));
 
         GL(glBindVertexArray(renderer->Panel.VertexArrayObject));
 
@@ -771,7 +812,8 @@ void destroyGraphicsNative() {
 void prepareLobbyRoom(int viewWidth,
                       int viewHeight,
                       const unsigned int *swapchainTextures[2],
-                      int swapchainLength) {
+                      int swapchainLength,
+                      bool enable_srgb_correction) {
     for (int eye = 0; eye < 2; eye++) {
         g_ctx.lobbySwapchainTextures[eye].clear();
 
@@ -789,7 +831,9 @@ void prepareLobbyRoom(int viewWidth,
                        g_ctx.lobbySwapchainTextures,
                        {false},
                        true,
-                       false);
+                       enable_srgb_correction,
+                       false,
+                       1.0);
 }
 
 // on pause
@@ -835,7 +879,9 @@ void streamStartNative(FfiStreamConfig config) {
                         config.foveationEdgeRatioX,
                         config.foveationEdgeRatioY},
                        false,
-                       config.enableSrgbCorrection);
+                       config.enableSrgbCorrection,
+                       config.fixLimitedRange,
+                       config.encodingGamma);
 }
 
 void updateLobbyHudTexture(const unsigned char *data) {

@@ -36,17 +36,17 @@ Once Flatpak is installed, the flatpak dependencies must also be installed. They
 These can be installed like so:
 
 ```
-flatpak install flathub org.freedesktop.Sdk//22.08 \
-    org.freedesktop.Sdk.Extension.llvm16//22.08 \
-    org.freedesktop.Sdk.Extension.rust-stable//22.08 \
+flatpak install flathub org.freedesktop.Sdk//23.08 \
+    org.freedesktop.Sdk.Extension.llvm16//23.08 \
+    org.freedesktop.Sdk.Extension.rust-stable//23.08 \
     com.valvesoftware.Steam
 ```
 
 AMD users may need to install the appropriate Mesa codec extensions as well:
 
 ```
-flatpak install flathub org.freedesktop.Platform.GL.default//22.08-extra \
-   org.freedesktop.Platform.GL32.default//22.08-extra
+flatpak install flathub org.freedesktop.Platform.GL.default//23.08-extra \
+   org.freedesktop.Platform.GL32.default//23.08-extra
 ```
 
 ## Setup
@@ -120,7 +120,11 @@ Currently the game audio and microphone to and from the headset isn't routed aut
 
 3. Download the [audio-flatpak-setup.sh](../alvr/xtask/flatpak/audio-flatpak-setup.sh) script and place it into the Flatpak app data directory located at `~/.var/app/com.valvesoftware.Steam/`. Make sure it has execute permissions (e.g. `chmod +x audio-flatpak-setup.sh`).
 
-4. In the ALVR Dashboard, under All Settings (Advanced) > Connection, set the On connect script and On disconnect script to the absolute path of the script (relative to the Flatpak environment), e.g. `/var/home/$USERNAME/audio-flatpak-setup.sh`.
+5. In the ALVR Dashboard, under All Settings (Advanced) > Connection, set the On connect script and On disconnect script to the absolute path of the script (relative to the Flatpak environment), e.g. `/home/$USER/.var/app/com.valvesoftware.Steam/audio-flatpak-setup.sh`.
+
+6. In a terminal, run `flatpak override --user --filesystem=xdg-run/pipewire-0 com.valvesoftware.Steam` to allow the script to set and map your headset's microphone
+
+7. Restart both Steam and the ALVR Dashboard
 
 ### Other Applications
 

@@ -22,7 +22,7 @@ pub enum FrameSize {
 }
 
 #[repr(u32)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub enum EncoderQualityPresetAmd {
     Quality = 0,
     Balanced = 1,
@@ -30,7 +30,7 @@ pub enum EncoderQualityPresetAmd {
 }
 
 #[repr(u32)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub enum EncoderQualityPresetNvidia {
     P1 = 1,
     P2 = 2,
@@ -42,7 +42,7 @@ pub enum EncoderQualityPresetNvidia {
 }
 
 #[repr(u32)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub enum NvencTuningPreset {
     HighQuality = 1,
     LowLatency = 2,
@@ -51,7 +51,7 @@ pub enum NvencTuningPreset {
 }
 
 #[repr(u32)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub enum NvencMultiPass {
     Disabled = 0,
     #[schema(strings(display_name = "1/4 resolution"))]
@@ -60,7 +60,7 @@ pub enum NvencMultiPass {
 }
 
 #[repr(u32)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub enum NvencAdaptiveQuantizationMode {
     Disabled = 0,
     Spatial = 1,
@@ -68,7 +68,7 @@ pub enum NvencAdaptiveQuantizationMode {
 }
 
 #[repr(u8)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(gui = "button_group")]
 pub enum RateControlMode {
     #[schema(strings(display_name = "CBR"))]
@@ -78,7 +78,7 @@ pub enum RateControlMode {
 }
 
 #[repr(u8)]
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(gui = "button_group")]
 pub enum EntropyCoding {
     #[schema(strings(display_name = "CAVLC"))]
@@ -88,7 +88,7 @@ pub enum EntropyCoding {
 }
 
 /// Except for preset, the value of these fields is not applied if == -1 (flag)
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(collapsible)]
 pub struct NvencConfig {
     #[schema(strings(
@@ -139,13 +139,28 @@ Temporal: Helps improve overall encoding quality, very small trade-off in speed.
     pub enable_weighted_prediction: bool,
 }
 
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(collapsible)]
 pub struct AmfConfig {
     #[schema(flag = "steamvr-restart")]
     pub quality_preset: EncoderQualityPresetAmd,
-    #[schema(strings(display_name = "Enable VBAQ"), flag = "steamvr-restart")]
+    #[schema(
+        strings(
+            display_name = "Enable VBAQ/CAQ",
+            help = "Enables Variance Based Adaptive Quantization on h264 and HEVC, and Content Adaptive Quantization on AV1"
+        ),
+        flag = "steamvr-restart"
+    )]
     pub enable_vbaq: bool,
+    #[schema(
+        strings(
+            display_name = "Enable High-Motion Quality Boost",
+            help = r#"Enables high motion quality boost mode.
+Allows the encoder to perform pre-analysis the motion of the video and use the information for better encoding"#
+        ),
+        flag = "steamvr-restart"
+    )]
+    pub enable_hmqb: bool,
     #[schema(flag = "steamvr-restart")]
     pub use_preproc: bool,
     #[schema(gui(slider(min = 0, max = 10)))]
@@ -154,9 +169,18 @@ pub struct AmfConfig {
     #[schema(gui(slider(min = 0, max = 10)))]
     #[schema(flag = "steamvr-restart")]
     pub preproc_tor: u32,
+    #[schema(
+        strings(
+            display_name = "Enable Pre-analysis",
+            help = r#"Enables pre-analysis during encoding. This will likely result in reduced performance, but may increase quality.
+Does not work with the "Reduce color banding" option, requires enabling "Use preproc""#
+        ),
+        flag = "steamvr-restart"
+    )]
+    pub enable_pre_analysis: bool,
 }
 
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SoftwareEncodingConfig {
     #[schema(strings(
         display_name = "Force software encoding",
@@ -170,7 +194,7 @@ pub struct SoftwareEncodingConfig {
     pub thread_count: u32,
 }
 
-#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(collapsible)]
 pub struct EncoderConfig {
     #[schema(strings(help = r#"CBR: Constant BitRate mode. This is recommended.
@@ -197,11 +221,46 @@ CABAC produces better compression but it's significantly slower and may lead to 
     pub entropy_coding: EntropyCoding,
 
     #[schema(strings(
-        display_name = "Reduce color banding",
+        display_name = "10 bit encoding",
         help = "Sets the encoder to use 10 bits per channel instead of 8. Does not work on Linux with Nvidia"
     ))]
     #[schema(flag = "steamvr-restart")]
     pub use_10bit: bool,
+
+    #[schema(strings(
+        display_name = "Full range color",
+        help = "Sets the encoder to encode full range RGB (0-255) instead of limited/video range RGB (16-235)"
+    ))]
+    #[schema(flag = "steamvr-restart")]
+    pub use_full_range: bool,
+
+    #[schema(strings(
+        display_name = "Encoding Gamma",
+        help = "To prioritize darker pixels at the expense of potentially additional banding in midtones, set to 2.2. To allow the encoder to decide priority on its own, set to 1.0."
+    ))]
+    #[schema(flag = "steamvr-restart")]
+    pub encoding_gamma: f32,
+
+    #[schema(strings(
+        display_name = "Enable HDR",
+        help = "Composite VR layers to an RGBA float16 framebuffer, and do sRGB/YUV conversions in shader code."
+    ))]
+    #[schema(flag = "steamvr-restart")]
+    pub enable_hdr: bool,
+
+    #[schema(strings(
+        display_name = "Force HDR sRGB Correction",
+        help = "Forces sRGB correction on all composited SteamVR layers. Useful if an HDR-injected game is too dark."
+    ))]
+    #[schema(flag = "steamvr-restart")]
+    pub force_hdr_srgb_correction: bool,
+
+    #[schema(strings(
+        display_name = "Clamp HDR extended range",
+        help = "Clamps HDR extended range to 0.0~1.0, useful if you only want HDR to reduce banding."
+    ))]
+    #[schema(flag = "steamvr-restart")]
+    pub clamp_hdr_extended_range: bool,
 
     #[schema(strings(display_name = "NVENC"))]
     #[schema(flag = "steamvr-restart")]
@@ -361,6 +420,9 @@ pub struct ClientsideFoveationConfig {
 #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
 #[schema(collapsible)]
 pub struct FoveatedEncodingConfig {
+    #[schema(strings(help = "Force enable on smartphone clients"))]
+    pub force_enable: bool,
+
     #[schema(strings(display_name = "Center region width"))]
     #[schema(gui(slider(min = 0.0, max = 1.0, step = 0.01)))]
     #[schema(flag = "steamvr-restart")]
@@ -418,19 +480,20 @@ pub struct ColorCorrectionConfig {
 }
 
 #[repr(u8)]
-#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Default)]
 #[schema(gui = "button_group")]
 pub enum CodecType {
+    #[default]
     #[schema(strings(display_name = "h264"))]
     H264 = 0,
     #[schema(strings(display_name = "HEVC"))]
     Hevc = 1,
-    #[schema(strings(display_name = "AV1 (VAAPI only)"))]
+    #[schema(strings(display_name = "AV1 (AMD only)"))]
     AV1 = 2,
 }
 
 #[repr(u8)]
-#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(SettingsSchema, Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 #[schema(gui = "button_group")]
 pub enum H264Profile {
     #[schema(strings(display_name = "High"))]
@@ -543,7 +606,10 @@ pub struct AudioBufferingConfig {
 #[schema(collapsible)]
 pub struct GameAudioConfig {
     pub device: Option<CustomAudioDeviceConfig>,
+
+    #[schema(strings(display_name = "Mute desktop audio when streaming"))]
     pub mute_when_streaming: bool,
+
     pub buffering: AudioBufferingConfig,
 }
 
@@ -581,8 +647,10 @@ pub struct AudioConfig {
     #[schema(strings(help = "ALSA is recommended for most PulseAudio or PipeWire-based setups"))]
     pub linux_backend: LinuxAudioBackend,
 
+    #[schema(strings(display_name = "Headset speaker"))]
     pub game_audio: Switch<GameAudioConfig>,
 
+    #[schema(strings(display_name = "Headset microphone"))]
     pub microphone: Switch<MicrophoneConfig>,
 }
 
@@ -620,6 +688,36 @@ pub enum FaceTrackingSinkConfig {
 pub struct FaceTrackingConfig {
     pub sources: FaceTrackingSourcesConfig,
     pub sink: FaceTrackingSinkConfig,
+}
+
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
+pub struct BodyTrackingSourcesConfig {
+    pub body_tracking_full_body_meta: Switch<BodyTrackingFullBodyMETAConfig>,
+}
+
+#[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq)]
+#[schema(collapsible)]
+pub struct BodyTrackingFullBodyMETAConfig {
+    #[schema(strings(help = "Enable full body tracking"))]
+    pub enable_full_body: bool,
+}
+
+#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+pub enum BodyTrackingSinkConfig {
+    #[schema(strings(display_name = "Fake Vive Trackers"))]
+    FakeViveTracker,
+    #[schema(strings(display_name = "VRChat Body OSC"))]
+    VrchatBodyOsc { port: u16 },
+}
+
+#[derive(SettingsSchema, Serialize, Deserialize, Clone)]
+#[schema(collapsible)]
+pub struct BodyTrackingConfig {
+    pub sources: BodyTrackingSourcesConfig,
+    pub sink: BodyTrackingSinkConfig,
+    #[schema(strings(help = "Turn this off to temporarily pause tracking."))]
+    #[schema(flag = "real-time")]
+    pub tracked: bool,
 }
 
 #[derive(SettingsSchema, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -884,6 +982,9 @@ pub struct HeadsetConfig {
     pub enable_vive_tracker_proxy: bool,
 
     pub face_tracking: Switch<FaceTrackingConfig>,
+
+    #[schema(flag = "steamvr-restart")]
+    pub body_tracking: Switch<BodyTrackingConfig>,
 
     #[schema(flag = "steamvr-restart")]
     pub controllers: Switch<ControllersConfig>,
@@ -1224,6 +1325,11 @@ pub fn session_settings_default() -> SettingsDefault {
                     variant: EntropyCodingDefaultVariant::Cavlc,
                 },
                 use_10bit: false,
+                use_full_range: true,
+                encoding_gamma: 1.0,
+                enable_hdr: false,
+                force_hdr_srgb_correction: false,
+                clamp_hdr_extended_range: false,
                 nvenc: NvencConfigDefault {
                     gui_collapsed: true,
                     quality_preset: EncoderQualityPresetNvidiaDefault {
@@ -1258,7 +1364,9 @@ pub fn session_settings_default() -> SettingsDefault {
                     quality_preset: EncoderQualityPresetAmdDefault {
                         variant: EncoderQualityPresetAmdDefaultVariant::Speed,
                     },
+                    enable_pre_analysis: false,
                     enable_vbaq: false,
+                    enable_hmqb: false,
                     use_preproc: false,
                     preproc_sigma: 4,
                     preproc_tor: 7,
@@ -1299,6 +1407,7 @@ pub fn session_settings_default() -> SettingsDefault {
                 enabled: true,
                 content: FoveatedEncodingConfigDefault {
                     gui_collapsed: true,
+                    force_enable: false,
                     center_size_x: 0.45,
                     center_size_y: 0.4,
                     center_shift_x: 0.4,
@@ -1406,6 +1515,26 @@ pub fn session_settings_default() -> SettingsDefault {
                         VrchatEyeOsc: FaceTrackingSinkConfigVrchatEyeOscDefault { port: 9000 },
                         variant: FaceTrackingSinkConfigDefaultVariant::VrchatEyeOsc,
                     },
+                },
+            },
+            body_tracking: SwitchDefault {
+                enabled: false,
+                content: BodyTrackingConfigDefault {
+                    gui_collapsed: true,
+                    sources: BodyTrackingSourcesConfigDefault {
+                        body_tracking_full_body_meta: SwitchDefault {
+                            enabled: true,
+                            content: BodyTrackingFullBodyMETAConfigDefault {
+                                gui_collapsed: true,
+                                enable_full_body: true,
+                            },
+                        },
+                    },
+                    sink: BodyTrackingSinkConfigDefault {
+                        VrchatBodyOsc: BodyTrackingSinkConfigVrchatBodyOscDefault { port: 9000 },
+                        variant: BodyTrackingSinkConfigDefaultVariant::FakeViveTracker,
+                    },
+                    tracked: true,
                 },
             },
             controllers: SwitchDefault {
